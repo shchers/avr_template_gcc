@@ -22,8 +22,24 @@ EFUSE := 0xfd
 HFUSE := 0xd3
 LFUSE := 0xff
 
+# List of sources that used in project
+C_SRC := \
+	main.c
+
 # Firmware name
 BIN := avr_tmp
+
+# Path of current project
+TOP := $(shell pwd)
+
+# Output folder for all binaries
+BUILD_OUTPUT ?= $(TOP)/bin
+
+# Objects output dir
+OBJDIR := $(BUILD_OUTPUT)/objs
+
+# List of objects
+OBJS := $(addprefix $(OBJDIR)/,$(C_SRC:.c=.o))
 
 CFLAGS := -DF_CPU=$(F_CPU)UL
 # Compiler options
@@ -52,22 +68,31 @@ BITCLOCK := 4MHz
 all: firmware
 
 clean:
-	@rm -v *.o $(BIN).elf $(BIN).hex $(BIN).eep $(BIN).map
+	@rm -vrf $(BUILD_OUTPUT)
 
 fuses:
 	@dialog --yesno "Do you really want to flash FUSES?" 0 0
 	@avrdude -p $(MCU) -c avrispmkII -P usb -B $(BITCLOCK) -U efuse:w:$(EFUSE):m -U hfuse:w:$(HFUSE):m -U lfuse:w:$(LFUSE):m
 
-firmware:
-# Compiling sources
-	@avr-gcc -c $(CFLAGS) main.c -o main.o
-	@avr-gcc $(CFLAGS) main.o --output $(BIN).elf -Wl,-Map=$(BIN).map,--cref $(LDFLAGS)
+mkdirs:
+	@mkdir -p $(BUILD_OUTPUT)
+	@mkdir -p $(OBJDIR)
+
+$(OBJDIR)/%.o : %.c
+	@echo "\\033[33m--- Building $< ---\\033[0m"
+	@avr-gcc $(CFLAGS) -c $< -o $@
+
+$(BUILD_OUTPUT)/$(BIN).elf: mkdirs $(OBJS)
+	@echo "\\033[1;37;42m--- Linking $(@) ---\\033[0m"
+	@avr-gcc $(CFLAGS) $(OBJS) --output $(@) -Wl,-Map=$(BUILD_OUTPUT)/$(BIN).map,--cref $(LDFLAGS)
 # Creating load file for Flash
-	@avr-objcopy -O ihex -R .eeprom -R .fuse -R .lock -R .signature $(BIN).elf $(BIN).hex
+	@avr-objcopy -O ihex -R .eeprom -R .fuse -R .lock -R .signature $(@) $(BUILD_OUTPUT)/$(BIN).hex
 # Creating load file for EEPROM
-	@avr-objcopy -j .eeprom --set-section-flags=.eeprom="alloc,load" --change-section-lma .eeprom=0 --no-change-warnings -O ihex $(BIN).elf $(BIN).eep
+	@avr-objcopy -j .eeprom --set-section-flags=.eeprom="alloc,load" --change-section-lma .eeprom=0 --no-change-warnings -O ihex $(@) $(BUILD_OUTPUT)/$(BIN).eep
 # Just print size
-	@avr-size --format=avr --mcu=$(MCU) -C $(BIN).elf
+	@avr-size --format=avr --mcu=$(MCU) -C $(@)
+
+firmware: $(BUILD_OUTPUT)/$(BIN).elf
 
 flash: firmware
-	@avrdude -p $(MCU) -c avrispmkII -P usb -B $(BITCLOCK) -U flash:w:$(BIN).hex
+	@avrdude -p $(MCU) -c avrispmkII -P usb -B $(BITCLOCK) -U flash:w:$(BUILD_OUTPUT)/$(BIN).hex
